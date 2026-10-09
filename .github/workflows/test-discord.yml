@@ -7,28 +7,114 @@ on:
 jobs:
   test-discord:
     runs-on: ubuntu-latest
+
     steps:
       - name: Send Discord test notification
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
         run: |
           python3 - <<'PY'
           import json
           import os
+          import sys
           import urllib.request
+          import urllib.error
+          from urllib.parse import urlparse
 
-          url = os.environ['DISCORD_WEBHOOK_URL']
-          payload = json.dumps({
-              'username': 'JUP RSI Alert Bot',
-              'content': '✅ JUP RSI Alert Bot is connected! GitHub Actions can send notifications to this channel.'
-          }).encode('utf-8')
-          req = urllib.request.Request(
-              url,
+          webhook_url = os.environ.get(
+              "DISCORD_WEBHOOK_URL", ""
+          ).strip()
+
+          if not webhook_url:
+              print("ERROR: Discord webhook secret is missing.")
+              sys.exit(1)
+
+          parsed = urlparse(webhook_url)
+
+          if (
+              parsed.scheme != "https"
+              or parsed.hostname not in (
+                  "discord.com",
+                  "discordapp.com"
+              )
+              or not parsed.path.startswith("/api/webhooks/")
+          ):
+              print("ERROR: Invalid Discord webhook URL.")
+              sys.exit(1)
+
+          message = {
+              "username": "JUP RSI Alert Bot",
+              "embeds": [
+                  {
+                      "title": "JUP RSI Alert Bot Connected",
+                      "description": (
+                          "Test notification successful!\n\n"
+                          "Token: JUP\n"
+                          "Timeframe: 1 Hour\n"
+                          "RSI Period: 14\n"
+                          "Oversold Alert: RSI <= 30\n"
+                          "Overbought Alert: RSI >= 70"
+                      ),
+                      "color": 3066993,
+                      "footer": {
+                          "text": "JUP RSI Discord Bot V1.0.0"
+                      }
+                  }
+              ]
+          }
+
+          payload = json.dumps(message).encode("utf-8")
+
+          headers = {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "User-Agent": "JUP-RSI-Discord-Alert/1.0"
+          }
+
+          request = urllib.request.Request(
+              webhook_url,
               data=payload,
-              headers={'Content-Type': 'application/json'},
-              method='POST'
+              headers=headers,
+              method="POST"
           )
-          with urllib.request.urlopen(req, timeout=20) as response:
-              print('Discord notification sent:', response.status)
+
+          try:
+              with urllib.request.urlopen(
+                  request, timeout=30
+              ) as response:
+                  print(
+                      "SUCCESS: Discord notification sent."
+                  )
+                  print("HTTP status:", response.status)
+
+          except urllib.error.HTTPError as error:
+              print("Discord request failed.")
+              print("HTTP status:", error.code)
+
+              # Never print the webhook URL or raw
+              # response body, which could contain
+              # sensitive information.
+              if error.code == 401:
+                  print("Possible invalid webhook credentials.")
+              elif error.code == 403:
+                  print(
+                      "Access forbidden. Discord or its "
+                      "security layer rejected the request."
+                  )
+              elif error.code == 404:
+                  print("Webhook not found or deleted.")
+              elif error.code == 429:
+                  print("Discord rate limit reached.")
+              else:
+                  print("Unexpected HTTP error.")
+
+              sys.exit(1)
+
+          except urllib.error.URLError as error:
+              print("Network connection failed.")
+              print("Error type:", type(error.reason).__name__)
+              sys.exit(1)
+
+          print("Test completed successfully.")
           PY
-  
