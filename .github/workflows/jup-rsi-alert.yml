@@ -4,7 +4,7 @@ on:
   schedule:
     # Run approximately every 5 minutes:
     # :02, :07, :12, :17, :22, etc. (UTC)
-    - cron: "2-59/5 * * * *"
+    - cron: "3-59/5 * * * *"
 
   # Allow manual testing from GitHub Actions
   workflow_dispatch:
