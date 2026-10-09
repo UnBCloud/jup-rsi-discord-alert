@@ -9,21 +9,18 @@ from datetime import datetime, timezone
 
 # ============================================================
 # JUP RSI + BOLLINGER BANDS DISCORD ALERT BOT
-# VERSION: V1.0.1 - API VERIFICATION
+# VERSION: V1.0.2 - JUPITER API VERIFICATION
 #
 # Data source: Jupiter's actual JUP chart API
 # Timeframe: 1 Hour
-# RSI: 14
+# RSI: 14 (Wilder smoothing)
 # Bollinger Bands: 20 periods, 2 standard deviations
 #
-# Verification only - Discord alerts are NOT enabled.
+# VERIFICATION ONLY - NO DISCORD NOTIFICATIONS
 # ============================================================
 
 TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
-
-BASE_URL = (
-    f"https://datapi.jup.ag/v2/charts/{TOKEN}"
-)
+BASE_URL = f"https://datapi.jup.ag/v2/charts/{TOKEN}"
 
 TIMEFRAME = "1_HOUR"
 REQUESTED_CANDLES = 329
@@ -40,19 +37,21 @@ BB_MULTIPLIER = 2.0
 
 def utc_time(timestamp):
     return datetime.fromtimestamp(
-        timestamp,
-        tz=timezone.utc
+        timestamp, tz=timezone.utc
     ).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 # ============================================================
-# FETCH JUPITER CANDLE DATA
+# FETCH JUPITER CANDLES
 # ============================================================
 
 def fetch_candles():
+    # Jupiter expects a 13-digit millisecond timestamp.
+    timestamp_ms = int(time.time() * 1000)
+
     params = {
         "interval": TIMEFRAME,
-        "to": int(time.time()),
+        "to": timestamp_ms,
         "candles": REQUESTED_CANDLES,
         "type": "price",
         "quote": "usd",
@@ -60,11 +59,11 @@ def fetch_candles():
 
     url = BASE_URL + "?" + urllib.parse.urlencode(params)
 
-    print("=== JUPITER API REQUEST ===")
-    print("API:", BASE_URL)
-    print("Timeframe:", TIMEFRAME)
-    print("Candles requested:", REQUESTED_CANDLES)
-    print()
+    print("=== JUPITER API REQUEST ===", flush=True)
+    print("API:", BASE_URL, flush=True)
+    print("Timeframe:", TIMEFRAME, flush=True)
+    print("Timestamp (ms):", timestamp_ms, flush=True)
+    print("Candles requested:", REQUESTED_CANDLES, flush=True)
 
     request = urllib.request.Request(
         url,
@@ -78,10 +77,13 @@ def fetch_candles():
 
     try:
         with urllib.request.urlopen(
-            request,
-            timeout=30
+            request, timeout=30
         ) as response:
-            print("API HTTP status:", response.status)
+            print(
+                "API HTTP status:",
+                response.status,
+                flush=True
+            )
             payload = json.load(response)
 
     except urllib.error.HTTPError as error:
@@ -95,21 +97,22 @@ def fetch_candles():
             f"{type(error.reason).__name__}"
         ) from error
 
+    if not isinstance(payload, dict):
+        raise RuntimeError("Unexpected API response format")
+
     raw_candles = payload.get("candles")
 
     if not isinstance(raw_candles, list):
-        print(
-            "Response fields:",
-            list(payload.keys())
-            if isinstance(payload, dict)
-            else type(payload).__name__
-        )
-
+        print("Response fields:", list(payload.keys()))
         raise RuntimeError(
-            "Unexpected API response: candles list missing"
+            "Jupiter response has no candles list"
         )
 
-    print("Candles received (raw):", len(raw_candles))
+    print(
+        "Candles received (raw):",
+        len(raw_candles),
+        flush=True
+    )
 
     candles = []
 
@@ -122,24 +125,29 @@ def fetch_candles():
             "close": float(item["close"]),
         }
 
-        if not all(
-            math.isfinite(candle[field])
-            for field in ("open", "high", "low", "close")
-        ):
-            raise RuntimeError(
-                "Invalid candle price detected"
-            )
+        prices = (
+            candle["open"],
+            candle["high"],
+            candle["low"],
+            candle["close"],
+        )
+
+        if not all(math.isfinite(price) for price in prices):
+            raise RuntimeError("Invalid candle price")
 
         if (
-            candle["high"] < candle["low"]
-            or candle["high"] < candle["open"]
-            or candle["high"] < candle["close"]
-            or candle["low"] > candle["open"]
-            or candle["low"] > candle["close"]
-        ):
-            raise RuntimeError(
-                "Invalid OHLC candle detected"
+            candle["high"] < max(
+                candle["open"],
+                candle["close"],
+                candle["low"]
             )
+            or candle["low"] > min(
+                candle["open"],
+                candle["close"],
+                candle["high"]
+            )
+        ):
+            raise RuntimeError("Invalid OHLC candle")
 
         candles.append(candle)
 
@@ -148,23 +156,25 @@ def fetch_candles():
     timestamps = [c["time"] for c in candles]
 
     if len(timestamps) != len(set(timestamps)):
-        raise RuntimeError(
-            "Duplicate candle timestamps detected"
-        )
+        raise RuntimeError("Duplicate candle timestamps")
 
-    print("Candles received (validated):", len(candles))
+    print(
+        "Candles received (validated):",
+        len(candles),
+        flush=True
+    )
 
     if candles:
         print(
             "Oldest candle:",
-            utc_time(candles[0]["time"])
+            utc_time(candles[0]["time"]),
+            flush=True
         )
         print(
             "Newest candle:",
-            utc_time(candles[-1]["time"])
+            utc_time(candles[-1]["time"]),
+            flush=True
         )
-
-    print()
 
     if len(candles) < MINIMUM_CANDLES:
         raise RuntimeError(
@@ -174,18 +184,14 @@ def fetch_candles():
             f"minimum required {MINIMUM_CANDLES}"
         )
 
-    for previous, current in zip(
-        candles,
-        candles[1:]
-    ):
-        if (
-            current["time"] - previous["time"]
-            != 3600
-        ):
+    for previous, current in zip(candles, candles[1:]):
+        difference = current["time"] - previous["time"]
+
+        if difference != 3600:
             raise RuntimeError(
-                "Missing or irregular 1-hour candles "
-                f"between {utc_time(previous['time'])} "
-                f"and {utc_time(current['time'])}"
+                "Missing or irregular 1-hour candles: "
+                f"{utc_time(previous['time'])} to "
+                f"{utc_time(current['time'])}"
             )
 
     return candles
@@ -197,37 +203,26 @@ def fetch_candles():
 
 def calculate_rsi(closes, period=14):
     if len(closes) < period + 1:
-        raise ValueError(
-            "Insufficient RSI candle history"
-        )
+        raise ValueError("Insufficient RSI history")
 
     changes = [
         closes[i] - closes[i - 1]
         for i in range(1, len(closes))
     ]
 
-    gains = [
-        max(change, 0)
-        for change in changes
-    ]
-
-    losses = [
-        max(-change, 0)
-        for change in changes
-    ]
+    gains = [max(change, 0.0) for change in changes]
+    losses = [max(-change, 0.0) for change in changes]
 
     average_gain = sum(gains[:period]) / period
     average_loss = sum(losses[:period]) / period
 
     for i in range(period, len(changes)):
         average_gain = (
-            average_gain * (period - 1)
-            + gains[i]
+            average_gain * (period - 1) + gains[i]
         ) / period
 
         average_loss = (
-            average_loss * (period - 1)
-            + losses[i]
+            average_loss * (period - 1) + losses[i]
         ) / period
 
     if average_gain == 0 and average_loss == 0:
@@ -236,13 +231,9 @@ def calculate_rsi(closes, period=14):
     if average_loss == 0:
         return 100.0
 
-    relative_strength = (
-        average_gain / average_loss
-    )
+    relative_strength = average_gain / average_loss
 
-    return 100 - (
-        100 / (1 + relative_strength)
-    )
+    return 100 - 100 / (1 + relative_strength)
 
 
 # ============================================================
@@ -251,9 +242,7 @@ def calculate_rsi(closes, period=14):
 
 def calculate_bollinger(closes):
     if len(closes) < BB_PERIOD:
-        raise ValueError(
-            "Insufficient Bollinger Band history"
-        )
+        raise ValueError("Insufficient Bollinger history")
 
     window = closes[-BB_PERIOD:]
 
@@ -264,17 +253,10 @@ def calculate_bollinger(closes):
         for price in window
     ) / BB_PERIOD
 
-    standard_deviation = math.sqrt(variance)
+    deviation = math.sqrt(variance)
 
-    upper = (
-        middle
-        + BB_MULTIPLIER * standard_deviation
-    )
-
-    lower = (
-        middle
-        - BB_MULTIPLIER * standard_deviation
-    )
+    upper = middle + BB_MULTIPLIER * deviation
+    lower = middle - BB_MULTIPLIER * deviation
 
     return middle, upper, lower
 
@@ -286,64 +268,41 @@ def calculate_bollinger(closes):
 def main():
     print("========================================")
     print("JUPITER 1H INDICATOR VERIFICATION")
-    print("VERSION: V1.0.1")
+    print("VERSION: V1.0.2")
     print("========================================")
     print()
 
     print("Token:", TOKEN)
     print("Timeframe:", TIMEFRAME)
     print("RSI period:", RSI_PERIOD)
-    print(
-        "Bollinger Bands:",
-        BB_PERIOD,
-        BB_MULTIPLIER
-    )
+    print("Bollinger Bands:", BB_PERIOD, BB_MULTIPLIER)
     print()
 
     candles = fetch_candles()
 
     current = candles[-1]
-
-    closes = [
-        candle["close"]
-        for candle in candles
-    ]
+    closes = [candle["close"] for candle in candles]
 
     now = int(time.time())
+    current_hour = (now // 3600) * 3600
 
-    current_hour = (
-        now // 3600
-    ) * 3600
-
+    print()
     print("=== CANDLE FRESHNESS ===")
-    print(
-        "Current UTC hour:",
-        utc_time(current_hour)
-    )
-    print(
-        "Latest API candle:",
-        utc_time(current["time"])
-    )
+    print("Current UTC hour:", utc_time(current_hour))
+    print("Latest API candle:", utc_time(current["time"]))
 
     if current["time"] != current_hour:
         raise RuntimeError(
-            "Latest candle is not the current "
-            "1-hour candle. "
+            "Latest candle is not the current 1-hour candle. "
             f"Latest: {utc_time(current['time'])}; "
             f"Expected: {utc_time(current_hour)}"
         )
 
     print("Candle freshness: PASS")
-    print()
 
-    rsi = calculate_rsi(
-        closes,
-        RSI_PERIOD
-    )
+    rsi = calculate_rsi(closes, RSI_PERIOD)
 
-    middle, upper, lower = (
-        calculate_bollinger(closes)
-    )
+    middle, upper, lower = calculate_bollinger(closes)
 
     oversold = (
         rsi <= 30
@@ -355,28 +314,23 @@ def main():
         and current["high"] >= upper
     )
 
+    print()
     print("=== CURRENT 1H CANDLE ===")
-    print(
-        "Candle start:",
-        utc_time(current["time"])
-    )
-    print(
-        "Checked at:",
-        utc_time(now)
-    )
+    print("Candle start:", utc_time(current["time"]))
+    print("Checked at:", utc_time(now))
     print("Open:", f"{current['open']:.8f}")
     print("High:", f"{current['high']:.8f}")
     print("Low:", f"{current['low']:.8f}")
     print("Close:", f"{current['close']:.8f}")
-    print()
 
+    print()
     print("=== INDICATORS ===")
     print("RSI(14):", f"{rsi:.4f}")
     print("BB Middle:", f"{middle:.8f}")
     print("BB Upper:", f"{upper:.8f}")
     print("BB Lower:", f"{lower:.8f}")
-    print()
 
+    print()
     print("=== OVERSOLD CONDITIONS ===")
     print("RSI <= 30:", rsi <= 30)
     print(
@@ -384,8 +338,8 @@ def main():
         current["low"] <= lower
     )
     print("OVERSOLD SIGNAL:", oversold)
-    print()
 
+    print()
     print("=== OVERBOUGHT CONDITIONS ===")
     print("RSI >= 70:", rsi >= 70)
     print(
@@ -393,8 +347,8 @@ def main():
         current["high"] >= upper
     )
     print("OVERBOUGHT SIGNAL:", overbought)
-    print()
 
+    print()
     print("========================================")
     print("VERIFICATION COMPLETED SUCCESSFULLY")
     print("No Discord notifications were sent.")
