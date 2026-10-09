@@ -1,0 +1,34 @@
+
+name: Test Discord Notification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord test notification
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = os.environ['DISCORD_WEBHOOK_URL']
+          payload = json.dumps({
+              'username': 'JUP RSI Alert Bot',
+              'content': '✅ JUP RSI Alert Bot is connected! GitHub Actions can send notifications to this channel.'
+          }).encode('utf-8')
+          req = urllib.request.Request(
+              url,
+              data=payload,
+              headers={'Content-Type': 'application/json'},
+              method='POST'
+          )
+          with urllib.request.urlopen(req, timeout=20) as response:
+              print('Discord notification sent:', response.status)
+          PY
+  
