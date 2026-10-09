@@ -3,19 +3,26 @@ name: JUP RSI + BB Discord Monitor
 
 on:
   schedule:
-- cron: "2-59/5 * * * *
+    # Run approximately every 5 minutes:
+    # :02, :07, :12, :17, :22, etc. (UTC)
+    - cron: "2-59/5 * * * *"
 
+  # Allow manual testing from GitHub Actions
   workflow_dispatch:
 
+# Allow the workflow to save alert_state.json
 permissions:
   contents: write
 
+# Prevent overlapping runs from conflicting
+# when saving alert history
 concurrency:
   group: jup-rsi-alert-state
   cancel-in-progress: false
 
 jobs:
   monitor:
+    name: monitor
     runs-on: ubuntu-latest
 
     steps:
