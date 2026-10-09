@@ -1,0 +1,9 @@
+{
+  "candle_time": 1791540000,
+  "rsi_30_touched": false,
+  "rsi_70_touched": false,
+  "lower_bb_touched": false,
+  "upper_bb_touched": false,
+  "oversold_sent": false,
+  "overbought_sent": false
+}
