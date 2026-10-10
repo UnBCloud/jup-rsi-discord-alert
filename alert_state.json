@@ -1,8 +1,8 @@
 {
-  "candle_time": 1791640800,
+  "candle_time": 1791655200,
   "rsi_30_touched": false,
   "rsi_70_touched": false,
-  "lower_bb_touched": false,
+  "lower_bb_touched": true,
   "upper_bb_touched": false,
   "oversold_sent": false,
   "overbought_sent": false
