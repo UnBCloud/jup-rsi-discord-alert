@@ -1,6 +1,6 @@
 {
-  "candle_time": 1792022400,
-  "rsi_30_touched": false,
+  "candle_time": 1792040400,
+  "rsi_30_touched": true,
   "rsi_70_touched": false,
   "lower_bb_touched": false,
   "upper_bb_touched": false,
